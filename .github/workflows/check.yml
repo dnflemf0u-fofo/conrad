@@ -22,7 +22,7 @@ jobs:
           key: state-${{ github.run_id }}
           restore-keys: state-
 
-      - run: python3 check_booking.py --date 2026-12-19 --people 10
+      - run: python3 check_booking.py --date 2026-11-20 --people 10
         env:
           KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
           KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
