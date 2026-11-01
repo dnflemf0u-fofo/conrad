@@ -82,30 +82,46 @@ def kakao_post(url, fields, token=None):
     if token:
         headers["authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, data=urllib.parse.urlencode(fields).encode(), headers=headers)
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        e.msg = f"{e.msg} {e.read().decode('utf-8', 'replace')}"  # 카카오 오류 코드(KOE...) 표시
+        raise
 
 
-def kakao_login(rest_key, code):
+def with_secret(fields, client_secret):
+    # 앱에서 Client Secret을 켜둔 경우에만 필요
+    if client_secret:
+        fields["client_secret"] = client_secret
+    return fields
+
+
+def kakao_login(rest_key, code, client_secret=None):
     """인가 코드를 토큰으로 바꿔 kakao_token.json에 저장."""
-    tokens = kakao_post("https://kauth.kakao.com/oauth/token", {
-        "grant_type": "authorization_code",
-        "client_id": rest_key,
-        "redirect_uri": KAKAO_REDIRECT_URI,
-        "code": code,
-    })
+    try:
+        tokens = kakao_post("https://kauth.kakao.com/oauth/token", with_secret({
+            "grant_type": "authorization_code",
+            "client_id": rest_key,
+            "redirect_uri": KAKAO_REDIRECT_URI,
+            "code": code,
+        }, client_secret))
+    except urllib.error.HTTPError as e:
+        print(f"토큰 발급 실패 (HTTP {e.code}): {e.msg}")
+        sys.exit(1)
     tokens["rest_key"] = rest_key
+    tokens["client_secret"] = client_secret
     KAKAO_FILE.write_text(json.dumps(tokens, indent=2), "utf-8")
     print("카카오 토큰 저장 완료. 테스트 메시지를 보냅니다.")
     send_kakao("콘래드 예약 체크 알림이 연결됐어요.")
 
 
 def refresh_kakao(conf):
-    tokens = kakao_post("https://kauth.kakao.com/oauth/token", {
+    tokens = kakao_post("https://kauth.kakao.com/oauth/token", with_secret({
         "grant_type": "refresh_token",
         "client_id": conf["rest_key"],
         "refresh_token": conf["refresh_token"],
-    })
+    }, conf.get("client_secret")))
     conf.update(tokens)  # refresh_token은 만료가 가까울 때만 새로 내려옴
     if KAKAO_FILE.exists():
         KAKAO_FILE.write_text(json.dumps(conf, indent=2), "utf-8")
@@ -117,6 +133,7 @@ def load_kakao_conf():
         return {
             "rest_key": os.environ["KAKAO_REST_KEY"],
             "refresh_token": os.environ["KAKAO_REFRESH_TOKEN"],
+            "client_secret": os.environ.get("KAKAO_CLIENT_SECRET"),
             "access_token": "",
         }
     if KAKAO_FILE.exists():
@@ -212,10 +229,11 @@ def main():
     parser.add_argument("--exclude", nargs="*", default=["조식"], help="이름에 이 단어가 들어간 상품은 제외")
     parser.add_argument("--loop", type=float, metavar="MINUTES", help="N분마다 반복 체크")
     parser.add_argument("--kakao-login", nargs=2, metavar=("REST_KEY", "CODE"), help="카카오 토큰 최초 발급")
+    parser.add_argument("--kakao-secret", help="앱에서 Client Secret을 켜둔 경우 그 값")
     args = parser.parse_args()
 
     if args.kakao_login:
-        kakao_login(*args.kakao_login)
+        kakao_login(*args.kakao_login, args.kakao_secret)
         return
 
     while True:
